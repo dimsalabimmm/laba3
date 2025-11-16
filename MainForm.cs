@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Serialization;
 using Timer = System.Windows.Forms.Timer;
@@ -13,132 +14,193 @@ namespace Laba3
 {
     public partial class MainForm : Form
     {
-        private BindingSource _bindingSource = null!;
-        private BindingList<ICarBrand> _brands = null!;
+        private readonly BindingList<CarBrand> _brands = new BindingList<CarBrand>();
+        private readonly BindingSource _brandBindingSource = new BindingSource();
+        private readonly XmlSerializer _serializer = new XmlSerializer(typeof(List<CarBrand>));
 
-        private DataGridView _brandsGrid = null!;
-        private DataGridView _carsGrid = null!;
-        private ProgressBar _progressBar = null!;
-        private Timer _progressTimer = null!;
-        private Thread? _loadingThread;
+        private DataGridView _brandsGrid;
+        private DataGridView _carsGrid;
+        private ProgressBar _progressBar;
+        private Timer _progressTimer;
+        private CancellationTokenSource _loadCts;
 
-        private static readonly XmlSerializer BrandSerializer =
-            new XmlSerializer(typeof(List<CarBrandBase>), new[] { typeof(PassengerCarBrand), typeof(TruckCarBrand) });
+        private readonly Color _passengerColor = Color.FromArgb(210, 236, 255);
+        private readonly Color _truckColor = Color.FromArgb(255, 232, 208);
+        private readonly Color _gridAccent = Color.FromArgb(42, 48, 66);
 
         public MainForm()
         {
             InitializeComponent();
             InitializeDataBinding();
+            SeedInitialBrands();
         }
 
         private void InitializeComponent()
         {
             SuspendLayout();
 
-            Text = "Лабораторная №3 — Управление марками авто";
+            Text = "Лабораторная №3 — Марки автомобилей";
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(1050, 650);
+            MinimumSize = new Size(1100, 680);
+            BackColor = Color.FromArgb(245, 247, 252);
 
-            // Menu strip
-            var menuStrip = new MenuStrip();
-            var fileMenu = new ToolStripMenuItem("Файл");
+            // Menu
+            var menuStrip = new MenuStrip
+            {
+                BackColor = Color.FromArgb(32, 36, 48),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+
+            var fileMenu = new ToolStripMenuItem("Файл")
+            {
+                ForeColor = Color.White
+            };
+
             var saveMenu = new ToolStripMenuItem("Сохранить список марок", null, SaveMenu_Click);
             var loadMenu = new ToolStripMenuItem("Загрузить", null, LoadMenu_Click);
-            var exitMenu = new ToolStripMenuItem("Выход", null, (_, __) => Close());
-            fileMenu.DropDownItems.AddRange(new[] { saveMenu, loadMenu, exitMenu });
+            var exitMenu = new ToolStripMenuItem("Выход", null, (s, e) => Close());
+
+            fileMenu.DropDownItems.AddRange(new ToolStripItem[] { saveMenu, loadMenu, exitMenu });
             menuStrip.Items.Add(fileMenu);
             MainMenuStrip = menuStrip;
             Controls.Add(menuStrip);
 
-            // Progress bar docked bottom
+            // Progress bar
             _progressBar = new ProgressBar
             {
                 Dock = DockStyle.Bottom,
                 Height = 24,
-                Minimum = 0,
-                Maximum = 100
+                Style = ProgressBarStyle.Continuous,
+                Visible = false
             };
             Controls.Add(_progressBar);
 
-            // Split container (left brands, right cars)
-            var splitContainer = new SplitContainer
+            // Split container
+            var split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
-                Orientation = Orientation.Vertical,
-                SplitterWidth = 5
+                SplitterDistance = 560,
+                BackColor = Color.Transparent
             };
-            Controls.Add(splitContainer);
-            Controls.SetChildIndex(splitContainer, 0); // ensure menu strip stays top
+            Controls.Add(split);
+            Controls.SetChildIndex(split, 0);
 
             // Brands grid
             _brandsGrid = new DataGridView
             {
                 Dock = DockStyle.Fill,
+                AutoGenerateColumns = false,
                 AllowUserToAddRows = true,
                 AllowUserToDeleteRows = true,
-                AutoGenerateColumns = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 RowHeadersVisible = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+                BackgroundColor = Color.White,
+                GridColor = _gridAccent,
+                AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(248, 251, 255)
+                }
             };
+
+            _brandsGrid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = _gridAccent,
+                ForeColor = Color.White,
+                Alignment = DataGridViewContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+            _brandsGrid.EnableHeadersVisualStyles = false;
 
             _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "BrandName",
+                DataPropertyName = "BrandName",
                 HeaderText = "Марка",
-                DataPropertyName = "BrandName"
+                Width = 120
             });
             _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "ModelName",
+                DataPropertyName = "ModelName",
                 HeaderText = "Модель",
-                DataPropertyName = "ModelName"
+                Width = 150
             });
             _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "Horsepower",
+                DataPropertyName = "HorsePower",
                 HeaderText = "Мощность (л.с.)",
-                DataPropertyName = "Horsepower"
+                Width = 130
             });
             _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                Name = "MaxSpeed",
+                DataPropertyName = "MaxSpeed",
                 HeaderText = "Макс. скорость",
-                DataPropertyName = "MaxSpeed"
+                Width = 130
             });
-            _brandsGrid.Columns.Add(new DataGridViewComboBoxColumn
+            var typeColumn = new DataGridViewComboBoxColumn
             {
-                Name = "Type",
-                HeaderText = "Тип",
                 DataPropertyName = "Type",
-                DataSource = Enum.GetValues(typeof(CarType))
-            });
+                HeaderText = "Тип",
+                Width = 120,
+                DataSource = new[]
+                {
+                    new KeyValuePair<CarType, string>(CarType.Passenger, "Легковой"),
+                    new KeyValuePair<CarType, string>(CarType.Truck, "Грузовой")
+                },
+                DisplayMember = "Value",
+                ValueMember = "Key",
+                ValueType = typeof(CarType)
+            };
+            _brandsGrid.Columns.Add(typeColumn);
 
             _brandsGrid.SelectionChanged += BrandsGrid_SelectionChanged;
             _brandsGrid.CellFormatting += BrandsGrid_CellFormatting;
             _brandsGrid.CellValueChanged += BrandsGrid_CellValueChanged;
-            _brandsGrid.DataError += (s, e) => e.ThrowException = false;
+            _brandsGrid.CurrentCellDirtyStateChanged += BrandsGrid_CurrentCellDirtyStateChanged;
+            _brandsGrid.DataError += BrandsGrid_DataError;
 
-            splitContainer.Panel1.Controls.Add(_brandsGrid);
+            split.Panel1.Controls.Add(new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(12),
+                BackColor = Color.Transparent,
+                Controls = { _brandsGrid }
+            });
 
-            // Cars grid (manual fill)
+            // Cars grid
             _carsGrid = new DataGridView
             {
                 Dock = DockStyle.Fill,
                 ReadOnly = true,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                BackgroundColor = Color.White,
+                GridColor = _gridAccent,
+                RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                RowHeadersVisible = false
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
 
-            splitContainer.Panel2.Controls.Add(_carsGrid);
+            _carsGrid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(54, 60, 78),
+                ForeColor = Color.White,
+                Alignment = DataGridViewContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+            _carsGrid.EnableHeadersVisualStyles = false;
 
-            // Progress timer for loader feedback
-            _progressTimer = new Timer { Interval = 100 };
-            _progressTimer.Tick += (_, __) => _progressBar.Value = Math.Min(Loader.GetProgress(), 100);
+            split.Panel2.Controls.Add(new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(12),
+                BackColor = Color.Transparent,
+                Controls = { _carsGrid }
+            });
+
+            // Progress timer
+            _progressTimer = new Timer { Interval = 120 };
+            _progressTimer.Tick += ProgressTimer_Tick;
 
             FormClosing += MainForm_FormClosing;
 
@@ -148,43 +210,51 @@ namespace Laba3
 
         private void InitializeDataBinding()
         {
-            _brands = new BindingList<ICarBrand>();
-            _bindingSource = new BindingSource { DataSource = _brands };
-            _bindingSource.AddingNew += (_, e) => e.NewObject = new PassengerCarBrand();
-            _brandsGrid.DataSource = _bindingSource;
+            _brandBindingSource.DataSource = _brands;
+            _brandBindingSource.AddingNew += (s, e) => e.NewObject = new CarBrand();
+            _brandsGrid.DataSource = _brandBindingSource;
         }
 
-        private void BrandsGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+        private void SeedInitialBrands()
         {
-            if (e.RowIndex < 0) return;
+            _brands.Add(new CarBrand { BrandName = "Audi", ModelName = "A6", HorsePower = 245, MaxSpeed = 240, Type = CarType.Passenger });
+            _brands.Add(new CarBrand { BrandName = "Kamaz", ModelName = "6520", HorsePower = 400, MaxSpeed = 150, Type = CarType.Truck });
+            _brands.Add(new CarBrand { BrandName = "Tesla", ModelName = "Model S", HorsePower = 670, MaxSpeed = 265, Type = CarType.Passenger });
+            _brands.Add(new CarBrand { BrandName = "Volvo", ModelName = "FMX", HorsePower = 540, MaxSpeed = 180, Type = CarType.Truck });
+        }
+
+        private void BrandsGrid_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (_brandsGrid.IsCurrentCellDirty && _brandsGrid.CurrentCell is DataGridViewComboBoxCell)
+            {
+                _brandsGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        }
+
+        private void BrandsGrid_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            MessageBox.Show(this, "Некорректное значение. Проверьте ввод.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            e.ThrowException = false;
+        }
+
+        private void BrandsGrid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _brandsGrid.Rows.Count)
+            {
+                return;
+            }
 
             var row = _brandsGrid.Rows[e.RowIndex];
-            if (row.DataBoundItem is not ICarBrand brand) return;
+            var brand = row.DataBoundItem as CarBrand;
+            if (brand == null)
+            {
+                return;
+            }
 
-            row.DefaultCellStyle.BackColor = brand.Type == CarType.Passenger
-                ? Color.LightSkyBlue
-                : Color.LightSalmon;
+            UpdateRowColor(row, brand.Type);
         }
 
-        private void BrandsGrid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.RowIndex >= _brands.Count) return;
-            if (_brandsGrid.Columns[e.ColumnIndex].Name != "Type") return;
-
-            if (_brandsGrid.Rows[e.RowIndex].DataBoundItem is not ICarBrand currentBrand) return;
-
-            var selectedValue = _brandsGrid.Rows[e.RowIndex].Cells["Type"].Value;
-            if (selectedValue == null) return;
-
-            var newType = (CarType)Enum.Parse(typeof(CarType), selectedValue.ToString()!);
-            if (currentBrand.Type == newType) return;
-
-            var replacement = CarBrandBase.CloneWithType(currentBrand, newType);
-            _brands[e.RowIndex] = replacement;
-            _bindingSource.ResetBindings(false);
-        }
-
-        private void BrandsGrid_SelectionChanged(object? sender, EventArgs e)
+        private async void BrandsGrid_SelectionChanged(object sender, EventArgs e)
         {
             if (_brandsGrid.SelectedRows.Count == 0)
             {
@@ -193,114 +263,212 @@ namespace Laba3
                 return;
             }
 
-            var selectedRow = _brandsGrid.SelectedRows[0];
-            if (selectedRow.DataBoundItem is not ICarBrand brand) return;
+            var row = _brandsGrid.SelectedRows[0];
+            var brand = row.DataBoundItem as CarBrand;
+            if (brand == null)
+            {
+                return;
+            }
 
-            selectedRow.Tag = brand;
-            LoadCarsForBrand(brand);
+            await LoadCarsForBrandAsync(brand);
         }
 
-        private void LoadCarsForBrand(ICarBrand brand)
+        private async Task LoadCarsForBrandAsync(CarBrand brand)
         {
-            _carsGrid.Rows.Clear();
+            _loadCts?.Cancel();
+            _loadCts = new CancellationTokenSource();
+
+            ConfigureCarsGrid(brand.Type);
+            _progressBar.Value = 0;
+            _progressBar.Visible = true;
+            _progressTimer.Start();
+
+            try
+            {
+                var cars = await Loader.LoadAsync(brand, _loadCts.Token).ConfigureAwait(true);
+                PopulateCarsGrid(brand.Type, cars);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore
+            }
+            finally
+            {
+                _progressTimer.Stop();
+                _progressBar.Value = _progressBar.Maximum;
+                _progressBar.Visible = false;
+            }
+        }
+
+        private void ConfigureCarsGrid(CarType type)
+        {
             _carsGrid.Columns.Clear();
 
-            if (brand.Type == CarType.Passenger)
+            _carsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
-                _carsGrid.Columns.Add("RegNumber", "Регистрационный номер");
-                _carsGrid.Columns.Add("Multimedia", "Мультимедиа");
-                _carsGrid.Columns.Add("Airbags", "Подушек безопасности");
+                HeaderText = "Регистрационный номер",
+                Width = 200
+            });
+
+            if (type == CarType.Passenger)
+            {
+                _carsGrid.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    HeaderText = "Мультимедиа",
+                    Width = 220
+                });
+                _carsGrid.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    HeaderText = "Подушек безопасности",
+                    Width = 180
+                });
             }
             else
             {
-                _carsGrid.Columns.Add("RegNumber", "Регистрационный номер");
-                _carsGrid.Columns.Add("WheelCount", "Кол-во колес");
-                _carsGrid.Columns.Add("BodyVolume", "Объем кузова (м³)");
-            }
-
-            _progressBar.Value = 0;
-            _progressTimer.Start();
-
-            _loadingThread = new Thread(() =>
-            {
-                Loader.Load(brand);
-                BeginInvoke(new Action(() =>
+                _carsGrid.Columns.Add(new DataGridViewTextBoxColumn
                 {
-                    foreach (var car in Loader.GetCars(brand))
-                    {
-                        if (brand.Type == CarType.Passenger && car is PassengerCarInstance passenger)
-                        {
-                            _carsGrid.Rows.Add(passenger.RegistrationNumber, passenger.MultimediaName, passenger.AirbagCount);
-                        }
-                        else if (brand.Type == CarType.Truck && car is TruckInstance truck)
-                        {
-                            _carsGrid.Rows.Add(truck.RegistrationNumber, truck.WheelCount, truck.BodyVolume);
-                        }
-                    }
-
-                    _progressTimer.Stop();
-                    _progressBar.Value = 100;
-                }));
-            })
-            { IsBackground = true };
-
-            _loadingThread.Start();
-        }
-
-        private void SaveMenu_Click(object? sender, EventArgs e)
-        {
-            using var saveDialog = new SaveFileDialog
-            {
-                Filter = "XML files (*.xml)|*.xml",
-                Title = "Сохранить список марок"
-            };
-
-            if (saveDialog.ShowDialog() != DialogResult.OK) return;
-
-            try
-            {
-                var data = _brands.OfType<CarBrandBase>().Select(b => CarBrandBase.CloneWithType(b, b.Type)).ToList();
-                using var file = new FileStream(saveDialog.FileName, FileMode.Create);
-                BrandSerializer.Serialize(file, data);
-                MessageBox.Show("Список марок сохранён.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    HeaderText = "Кол-во колёс",
+                    Width = 120
+                });
+                _carsGrid.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    HeaderText = "Объём кузова (м³)",
+                    Width = 180
+                });
             }
         }
 
-        private void LoadMenu_Click(object? sender, EventArgs e)
+        private void PopulateCarsGrid(CarType type, IEnumerable<ICar> cars)
         {
-            using var openDialog = new OpenFileDialog
-            {
-                Filter = "XML files (*.xml)|*.xml",
-                Title = "Загрузить список марок"
-            };
+            _carsGrid.Rows.Clear();
 
-            if (openDialog.ShowDialog() != DialogResult.OK) return;
-
-            try
+            foreach (var car in cars)
             {
-                using var file = new FileStream(openDialog.FileName, FileMode.Open);
-                if (BrandSerializer.Deserialize(file) is List<CarBrandBase> loaded)
+                if (type == CarType.Passenger && car is PassengerCar passenger)
                 {
-                    _brands = new BindingList<ICarBrand>(loaded.Cast<ICarBrand>().ToList());
-                    _bindingSource.DataSource = _brands;
-                    _bindingSource.ResetBindings(false);
+                    _carsGrid.Rows.Add(passenger.RegistrationNumber, passenger.MultimediaName, passenger.AirbagCount);
+                }
+                else if (type == CarType.Truck && car is Truck truck)
+                {
+                    _carsGrid.Rows.Add(truck.RegistrationNumber, truck.WheelCount, truck.BodyVolume);
                 }
             }
-            catch (Exception ex)
+        }
+
+        private void BrandsGrid_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _brands.Count)
             {
-                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var row = _brandsGrid.Rows[e.RowIndex];
+            var brand = row.DataBoundItem as CarBrand;
+            if (brand == null)
+            {
+                return;
+            }
+
+            UpdateRowColor(row, brand.Type);
+
+            if (_brandsGrid.Columns[e.ColumnIndex].DataPropertyName == "Type")
+            {
+                Loader.Invalidate(brand.Id);
+                if (row.Selected)
+                {
+                    _ = LoadCarsForBrandAsync(brand);
+                }
             }
         }
 
-        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
+        private void UpdateRowColor(DataGridViewRow row, CarType type)
         {
-            if (_loadingThread != null && _loadingThread.IsAlive)
+            row.DefaultCellStyle.BackColor = type == CarType.Passenger ? _passengerColor : _truckColor;
+            row.DefaultCellStyle.SelectionBackColor = type == CarType.Passenger
+                ? Color.FromArgb(140, 190, 230)
+                : Color.FromArgb(255, 190, 140);
+        }
+
+        private void ProgressTimer_Tick(object sender, EventArgs e)
+        {
+            var progress = Loader.GetProgress();
+            int value = (int)Math.Round(progress * _progressBar.Maximum);
+            value = Math.Max(_progressBar.Minimum, Math.Min(_progressBar.Maximum, value));
+            _progressBar.Value = value;
+        }
+
+        private void SaveMenu_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new SaveFileDialog
             {
-                _loadingThread.Join(200);
+                Filter = "XML файлы (*.xml)|*.xml",
+                Title = "Сохранить список марок"
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    using (var stream = File.Create(dialog.FileName))
+                    {
+                        _serializer.Serialize(stream, _brands.ToList());
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Не удалось сохранить файл: " + ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void LoadMenu_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new OpenFileDialog
+            {
+                Filter = "XML файлы (*.xml)|*.xml",
+                Title = "Загрузить список марок"
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    using (var stream = File.OpenRead(dialog.FileName))
+                    {
+                        var loaded = _serializer.Deserialize(stream) as List<CarBrand>;
+                        if (loaded != null)
+                        {
+                            _brands.Clear();
+                            foreach (var brand in loaded)
+                            {
+                                if (string.IsNullOrWhiteSpace(brand.Id))
+                                {
+                                    brand.Id = Guid.NewGuid().ToString();
+                                }
+                                _brands.Add(brand);
+                            }
+                            Loader.Clear();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "Не удалось загрузить файл: " + ex.Message, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (_loadCts != null)
+            {
+                _loadCts.Cancel();
             }
         }
     }

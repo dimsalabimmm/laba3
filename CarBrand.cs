@@ -9,63 +9,51 @@ namespace Laba3
         Truck
     }
 
-    public interface ICarBrand
+    public interface ICar
     {
-        string BrandName { get; set; }
-        string ModelName { get; set; }
-        int Horsepower { get; set; }
-        int MaxSpeed { get; set; }
-        CarType Type { get; set; }
+        string RegistrationNumber { get; set; }
     }
 
     [Serializable]
-    [XmlInclude(typeof(PassengerCarBrand))]
-    [XmlInclude(typeof(TruckCarBrand))]
-    public abstract class CarBrandBase : ICarBrand
+    [XmlInclude(typeof(PassengerCar))]
+    [XmlInclude(typeof(Truck))]
+    public class CarBrand
     {
+        public CarBrand()
+        {
+            if (string.IsNullOrWhiteSpace(Id))
+            {
+                Id = Guid.NewGuid().ToString();
+            }
+        }
+
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+
         public string BrandName { get; set; } = string.Empty;
+
         public string ModelName { get; set; } = string.Empty;
-        public int Horsepower { get; set; }
+
+        public int HorsePower { get; set; }
+
         public int MaxSpeed { get; set; }
-        public CarType Type { get; set; }
 
-        protected CarBrandBase()
-        {
-        }
-
-        protected CarBrandBase(CarType type)
-        {
-            Type = type;
-        }
-
-        public static CarBrandBase CloneWithType(ICarBrand source, CarType type)
-        {
-            CarBrandBase clone = type == CarType.Passenger
-                ? new PassengerCarBrand()
-                : new TruckCarBrand();
-
-            clone.BrandName = source.BrandName;
-            clone.ModelName = source.ModelName;
-            clone.Horsepower = source.Horsepower;
-            clone.MaxSpeed = source.MaxSpeed;
-            clone.Type = type;
-
-            return clone;
-        }
+        public CarType Type { get; set; } = CarType.Passenger;
     }
 
-    public class PassengerCarBrand : CarBrandBase
+    [Serializable]
+    public class PassengerCar : ICar
     {
-        public PassengerCarBrand() : base(CarType.Passenger)
-        {
-        }
+        public string RegistrationNumber { get; set; } = string.Empty;
+        public string MultimediaName { get; set; } = string.Empty;
+        public int AirbagCount { get; set; }
     }
 
-    public class TruckCarBrand : CarBrandBase
+    [Serializable]
+    public class Truck : ICar
     {
-        public TruckCarBrand() : base(CarType.Truck)
-        {
-        }
+        public string RegistrationNumber { get; set; } = string.Empty;
+        public int WheelCount { get; set; }
+        public double BodyVolume { get; set; }
     }
 }
 
