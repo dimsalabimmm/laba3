@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Xml.Serialization;
 using System.IO;
+using Timer = System.Windows.Forms.Timer;
 
 namespace Laba3
 {
@@ -27,14 +28,16 @@ namespace Laba3
 
         private void InitializeComponent()
         {
+            this.SuspendLayout();
+            
             this.Text = "Car Brands Management";
-            this.Size = new Size(1000, 600);
+            this.Size = new Size(1200, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
 
             // Menu Strip
             menuStrip = new MenuStrip();
             ToolStripMenuItem fileMenu = new ToolStripMenuItem("File");
-            ToolStripMenuItem saveItem = new ToolStripMenuItem("Save list of brands");
+            ToolStripMenuItem saveItem = new ToolStripMenuItem("Save Brand List");
             ToolStripMenuItem loadItem = new ToolStripMenuItem("Load");
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
 
@@ -47,19 +50,36 @@ namespace Laba3
             fileMenu.DropDownItems.Add(exitItem);
             menuStrip.Items.Add(fileMenu);
             this.MainMenuStrip = menuStrip;
-            this.Controls.Add(menuStrip);
 
-            // Brands DataGridView
-            brandsGridView = new DataGridView
+            // Progress Bar (at the very bottom of the form)
+            progressBar = new ProgressBar
             {
-                Dock = DockStyle.Left,
-                Width = 500,
-                AllowUserToAddRows = true,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false,
-                ReadOnly = false,
-                AutoGenerateColumns = false
+                Dock = DockStyle.Bottom,
+                Height = 30,
+                Style = ProgressBarStyle.Continuous,
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0
             };
+
+            // Split Container (vertical - left for brands, right for cars)
+            SplitContainer splitContainer = new SplitContainer();
+            splitContainer.Dock = DockStyle.Fill;
+            splitContainer.Orientation = Orientation.Vertical;
+            splitContainer.SplitterDistance = 600;
+            splitContainer.SplitterWidth = 5;
+
+            // Brands DataGridView (left panel)
+            brandsGridView = new DataGridView();
+            brandsGridView.Dock = DockStyle.Fill;
+            brandsGridView.AllowUserToAddRows = true;
+            brandsGridView.AllowUserToDeleteRows = true;
+            brandsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            brandsGridView.MultiSelect = false;
+            brandsGridView.ReadOnly = false;
+            brandsGridView.AutoGenerateColumns = false;
+            brandsGridView.RowHeadersVisible = true;
+            brandsGridView.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
             brandsGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -82,7 +102,7 @@ namespace Laba3
             brandsGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "MaxSpeed",
-                HeaderText = "Max Speed",
+                HeaderText = "Max Speed (km/h)",
                 DataPropertyName = "MaxSpeed"
             });
             
@@ -92,8 +112,6 @@ namespace Laba3
                 HeaderText = "Type",
                 DataSource = Enum.GetValues(typeof(CarType))
             };
-            typeColumn.DisplayMember = "ToString";
-            typeColumn.ValueMember = "ToString";
             brandsGridView.Columns.Add(typeColumn);
 
             brandsGridView.SelectionChanged += BrandsGridView_SelectionChanged;
@@ -102,40 +120,32 @@ namespace Laba3
             brandsGridView.RowsAdded += BrandsGridView_RowsAdded;
             brandsGridView.DataError += BrandsGridView_DataError;
 
-            // Cars DataGridView
-            carsGridView = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                ReadOnly = true,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
-            };
-
-            // Progress Bar
-            progressBar = new ProgressBar
-            {
-                Dock = DockStyle.Bottom,
-                Height = 30,
-                Style = ProgressBarStyle.Continuous
-            };
+            // Cars DataGridView (right panel)
+            carsGridView = new DataGridView();
+            carsGridView.Dock = DockStyle.Fill;
+            carsGridView.ReadOnly = true;
+            carsGridView.AllowUserToAddRows = false;
+            carsGridView.AllowUserToDeleteRows = false;
+            carsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            carsGridView.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            carsGridView.RowHeadersVisible = true;
 
             // Progress Timer
-            progressTimer = new Timer
-            {
-                Interval = 100
-            };
+            progressTimer = new Timer();
+            progressTimer.Interval = 100;
             progressTimer.Tick += ProgressTimer_Tick;
 
-            // Split Container
-            SplitContainer splitContainer = new SplitContainer
-            {
-                Dock = DockStyle.Fill,
-                SplitterDistance = 500
-            };
+            // Add controls to split container
             splitContainer.Panel1.Controls.Add(brandsGridView);
             splitContainer.Panel2.Controls.Add(carsGridView);
-            splitContainer.Panel2.Controls.Add(progressBar);
 
+            // Add controls to form in correct order
             this.Controls.Add(splitContainer);
+            this.Controls.Add(progressBar);
+            this.Controls.Add(menuStrip);
+            
+            this.ResumeLayout(false);
+            this.PerformLayout();
         }
 
         private void InitializeData()
