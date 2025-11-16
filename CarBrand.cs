@@ -9,52 +9,63 @@ namespace Laba3
         Truck
     }
 
-    [XmlInclude(typeof(PassengerCar))]
-    [XmlInclude(typeof(Truck))]
-    [XmlRoot("CarBrand")]
-    public abstract class CarBrand : IEquatable<CarBrand>
+    public interface ICarBrand
     {
-        public string BrandName { get; set; }
-        public string ModelName { get; set; }
+        string BrandName { get; set; }
+        string ModelName { get; set; }
+        int Horsepower { get; set; }
+        int MaxSpeed { get; set; }
+        CarType Type { get; set; }
+    }
+
+    [Serializable]
+    [XmlInclude(typeof(PassengerCarBrand))]
+    [XmlInclude(typeof(TruckCarBrand))]
+    public abstract class CarBrandBase : ICarBrand
+    {
+        public string BrandName { get; set; } = string.Empty;
+        public string ModelName { get; set; } = string.Empty;
         public int Horsepower { get; set; }
         public int MaxSpeed { get; set; }
-        public abstract CarType Type { get; }
+        public CarType Type { get; set; }
 
-        public bool Equals(CarBrand other)
+        protected CarBrandBase()
         {
-            if (other == null) return false;
-            return BrandName == other.BrandName &&
-                   ModelName == other.ModelName &&
-                   Horsepower == other.Horsepower &&
-                   MaxSpeed == other.MaxSpeed &&
-                   Type == other.Type;
         }
 
-        public override bool Equals(object obj)
+        protected CarBrandBase(CarType type)
         {
-            return Equals(obj as CarBrand);
+            Type = type;
         }
 
-        public override int GetHashCode()
+        public static CarBrandBase CloneWithType(ICarBrand source, CarType type)
         {
-            return (BrandName?.GetHashCode() ?? 0) ^
-                   (ModelName?.GetHashCode() ?? 0) ^
-                   Horsepower ^
-                   MaxSpeed ^
-                   Type.GetHashCode();
+            CarBrandBase clone = type == CarType.Passenger
+                ? new PassengerCarBrand()
+                : new TruckCarBrand();
+
+            clone.BrandName = source.BrandName;
+            clone.ModelName = source.ModelName;
+            clone.Horsepower = source.Horsepower;
+            clone.MaxSpeed = source.MaxSpeed;
+            clone.Type = type;
+
+            return clone;
         }
     }
 
-    [XmlRoot("PassengerCar")]
-    public class PassengerCar : CarBrand
+    public class PassengerCarBrand : CarBrandBase
     {
-        public override CarType Type => CarType.Passenger;
+        public PassengerCarBrand() : base(CarType.Passenger)
+        {
+        }
     }
 
-    [XmlRoot("Truck")]
-    public class Truck : CarBrand
+    public class TruckCarBrand : CarBrandBase
     {
-        public override CarType Type => CarType.Truck;
+        public TruckCarBrand() : base(CarType.Truck)
+        {
+        }
     }
 }
 

@@ -6,24 +6,26 @@ namespace Laba3
 {
     public static class Loader
     {
-        private static Dictionary<CarBrand, List<Car>> _cachedData = new Dictionary<CarBrand, List<Car>>();
-        private static int _progress = 0;
-        private static bool _isLoading = false;
-        private static Random _random = new Random();
+        private static readonly Dictionary<ICarBrand, List<Car>> CachedData = new Dictionary<ICarBrand, List<Car>>();
+        private static readonly Random Random = new Random();
+        private static int _progress;
 
-        public static void Load(CarBrand brand)
+        public static void Load(ICarBrand brand)
         {
-            if (_cachedData.ContainsKey(brand))
+            if (brand == null)
+            {
+                _progress = 0;
+                return;
+            }
+
+            if (CachedData.ContainsKey(brand))
             {
                 _progress = 100;
                 return;
             }
 
-            _isLoading = true;
-            _progress = 0;
-
             List<Car> cars = new List<Car>();
-            int carCount = _random.Next(10, 21); // 10 to 20 cars
+            int carCount = Random.Next(10, 21); // 10 to 20 cars
 
             for (int i = 0; i < carCount; i++)
             {
@@ -34,7 +36,7 @@ namespace Laba3
                     {
                         RegistrationNumber = GenerateRegistrationNumber(),
                         MultimediaName = GenerateMultimediaName(),
-                        AirbagCount = _random.Next(2, 9) // 2 to 8 airbags
+                        AirbagCount = Random.Next(2, 9) // 2 to 8 airbags
                     };
                 }
                 else
@@ -42,22 +44,21 @@ namespace Laba3
                     car = new TruckInstance
                     {
                         RegistrationNumber = GenerateRegistrationNumber(),
-                        WheelCount = _random.Next(4, 19), // 4 to 18 wheels
-                        BodyVolume = Math.Round(_random.NextDouble() * 50 + 10, 2) // 10 to 60 m³
+                        WheelCount = Random.Next(4, 19), // 4 to 18 wheels
+                        BodyVolume = Math.Round(Random.NextDouble() * 50 + 10, 2) // 10 to 60 m³
                     };
                 }
 
                 cars.Add(car);
 
                 // Random delay 0 to 0.5 seconds
-                Thread.Sleep(_random.Next(0, 501));
+                Thread.Sleep(Random.Next(0, 501));
 
                 _progress = (int)((i + 1) * 100.0 / carCount);
             }
 
-            _cachedData[brand] = cars;
+            CachedData[brand] = cars;
             _progress = 100;
-            _isLoading = false;
         }
 
         public static int GetProgress()
@@ -65,27 +66,27 @@ namespace Laba3
             return _progress;
         }
 
-        public static List<Car> GetCars(CarBrand brand)
+        public static List<Car> GetCars(ICarBrand brand)
         {
-            if (_cachedData.ContainsKey(brand))
+            if (brand != null && CachedData.ContainsKey(brand))
             {
-                return _cachedData[brand];
+                return CachedData[brand];
             }
             return new List<Car>();
         }
 
         private static string GenerateRegistrationNumber()
         {
-            string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            return $"{letters[_random.Next(letters.Length)]}{letters[_random.Next(letters.Length)]}" +
-                   $"{_random.Next(1000, 10000)}" +
-                   $"{letters[_random.Next(letters.Length)]}{letters[_random.Next(letters.Length)]}";
+            const string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            return $"{letters[Random.Next(letters.Length)]}{letters[Random.Next(letters.Length)]}" +
+                   $"{Random.Next(1000, 10000)}" +
+                   $"{letters[Random.Next(letters.Length)]}{letters[Random.Next(letters.Length)]}";
         }
 
         private static string GenerateMultimediaName()
         {
             string[] systems = { "Android Auto", "Apple CarPlay", "Tesla Infotainment", "BMW iDrive", "Mercedes MBUX", "Audi MMI" };
-            return systems[_random.Next(systems.Length)];
+            return systems[Random.Next(systems.Length)];
         }
     }
 }

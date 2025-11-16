@@ -1,430 +1,307 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 using System.Xml.Serialization;
-using System.IO;
 using Timer = System.Windows.Forms.Timer;
 
 namespace Laba3
 {
     public partial class MainForm : Form
     {
-        private BindingSource bindingSource;
-        private DataGridView brandsGridView;
-        private DataGridView carsGridView;
-        private ProgressBar progressBar;
-        private Timer progressTimer;
-        private MenuStrip menuStrip;
-        private Thread loadingThread;
+        private BindingSource _bindingSource = null!;
+        private BindingList<ICarBrand> _brands = null!;
+
+        private DataGridView _brandsGrid = null!;
+        private DataGridView _carsGrid = null!;
+        private ProgressBar _progressBar = null!;
+        private Timer _progressTimer = null!;
+        private Thread? _loadingThread;
+
+        private static readonly XmlSerializer BrandSerializer =
+            new XmlSerializer(typeof(List<CarBrandBase>), new[] { typeof(PassengerCarBrand), typeof(TruckCarBrand) });
 
         public MainForm()
         {
             InitializeComponent();
-            InitializeData();
+            InitializeDataBinding();
         }
 
         private void InitializeComponent()
         {
-            this.SuspendLayout();
-            
-            this.Text = "Car Brands Management";
-            this.Size = new Size(1200, 700);
-            this.StartPosition = FormStartPosition.CenterScreen;
+            SuspendLayout();
 
-            // Menu Strip
-            menuStrip = new MenuStrip();
-            ToolStripMenuItem fileMenu = new ToolStripMenuItem("File");
-            ToolStripMenuItem saveItem = new ToolStripMenuItem("Save Brand List");
-            ToolStripMenuItem loadItem = new ToolStripMenuItem("Load");
-            ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
+            Text = "Лабораторная №3 — Управление марками авто";
+            StartPosition = FormStartPosition.CenterScreen;
+            MinimumSize = new Size(1050, 650);
 
-            saveItem.Click += SaveItem_Click;
-            loadItem.Click += LoadItem_Click;
-            exitItem.Click += ExitItem_Click;
-
-            fileMenu.DropDownItems.Add(saveItem);
-            fileMenu.DropDownItems.Add(loadItem);
-            fileMenu.DropDownItems.Add(exitItem);
+            // Menu strip
+            var menuStrip = new MenuStrip();
+            var fileMenu = new ToolStripMenuItem("Файл");
+            var saveMenu = new ToolStripMenuItem("Сохранить список марок", null, SaveMenu_Click);
+            var loadMenu = new ToolStripMenuItem("Загрузить", null, LoadMenu_Click);
+            var exitMenu = new ToolStripMenuItem("Выход", null, (_, __) => Close());
+            fileMenu.DropDownItems.AddRange(new[] { saveMenu, loadMenu, exitMenu });
             menuStrip.Items.Add(fileMenu);
-            this.MainMenuStrip = menuStrip;
+            MainMenuStrip = menuStrip;
+            Controls.Add(menuStrip);
 
-            // Progress Bar (at the very bottom of the form)
-            progressBar = new ProgressBar
+            // Progress bar docked bottom
+            _progressBar = new ProgressBar
             {
                 Dock = DockStyle.Bottom,
-                Height = 30,
-                Style = ProgressBarStyle.Continuous,
+                Height = 24,
                 Minimum = 0,
-                Maximum = 100,
-                Value = 0
+                Maximum = 100
+            };
+            Controls.Add(_progressBar);
+
+            // Split container (left brands, right cars)
+            var splitContainer = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterWidth = 5
+            };
+            Controls.Add(splitContainer);
+            Controls.SetChildIndex(splitContainer, 0); // ensure menu strip stays top
+
+            // Brands grid
+            _brandsGrid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = true,
+                AllowUserToDeleteRows = true,
+                AutoGenerateColumns = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                RowHeadersVisible = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
 
-            // Split Container (vertical - left for brands, right for cars)
-            SplitContainer splitContainer = new SplitContainer();
-            splitContainer.Dock = DockStyle.Fill;
-            splitContainer.Orientation = Orientation.Vertical;
-            splitContainer.SplitterDistance = 600;
-            splitContainer.SplitterWidth = 5;
-
-            // Brands DataGridView (left panel)
-            brandsGridView = new DataGridView();
-            brandsGridView.Dock = DockStyle.Fill;
-            brandsGridView.AllowUserToAddRows = true;
-            brandsGridView.AllowUserToDeleteRows = true;
-            brandsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            brandsGridView.MultiSelect = false;
-            brandsGridView.ReadOnly = false;
-            brandsGridView.AutoGenerateColumns = false;
-            brandsGridView.RowHeadersVisible = true;
-            brandsGridView.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-
-            brandsGridView.Columns.Add(new DataGridViewTextBoxColumn
+            _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "BrandName",
-                HeaderText = "Brand Name",
+                HeaderText = "Марка",
                 DataPropertyName = "BrandName"
             });
-            brandsGridView.Columns.Add(new DataGridViewTextBoxColumn
+            _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "ModelName",
-                HeaderText = "Model Name",
+                HeaderText = "Модель",
                 DataPropertyName = "ModelName"
             });
-            brandsGridView.Columns.Add(new DataGridViewTextBoxColumn
+            _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Horsepower",
-                HeaderText = "Horsepower",
+                HeaderText = "Мощность (л.с.)",
                 DataPropertyName = "Horsepower"
             });
-            brandsGridView.Columns.Add(new DataGridViewTextBoxColumn
+            _brandsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "MaxSpeed",
-                HeaderText = "Max Speed (km/h)",
+                HeaderText = "Макс. скорость",
                 DataPropertyName = "MaxSpeed"
             });
-            
-            DataGridViewComboBoxColumn typeColumn = new DataGridViewComboBoxColumn
+            _brandsGrid.Columns.Add(new DataGridViewComboBoxColumn
             {
                 Name = "Type",
-                HeaderText = "Type",
+                HeaderText = "Тип",
+                DataPropertyName = "Type",
                 DataSource = Enum.GetValues(typeof(CarType))
+            });
+
+            _brandsGrid.SelectionChanged += BrandsGrid_SelectionChanged;
+            _brandsGrid.CellFormatting += BrandsGrid_CellFormatting;
+            _brandsGrid.CellValueChanged += BrandsGrid_CellValueChanged;
+            _brandsGrid.DataError += (s, e) => e.ThrowException = false;
+
+            splitContainer.Panel1.Controls.Add(_brandsGrid);
+
+            // Cars grid (manual fill)
+            _carsGrid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                RowHeadersVisible = false
             };
-            brandsGridView.Columns.Add(typeColumn);
 
-            brandsGridView.SelectionChanged += BrandsGridView_SelectionChanged;
-            brandsGridView.CellValueChanged += BrandsGridView_CellValueChanged;
-            brandsGridView.CellFormatting += BrandsGridView_CellFormatting;
-            brandsGridView.RowsAdded += BrandsGridView_RowsAdded;
-            brandsGridView.DataError += BrandsGridView_DataError;
+            splitContainer.Panel2.Controls.Add(_carsGrid);
 
-            // Cars DataGridView (right panel)
-            carsGridView = new DataGridView();
-            carsGridView.Dock = DockStyle.Fill;
-            carsGridView.ReadOnly = true;
-            carsGridView.AllowUserToAddRows = false;
-            carsGridView.AllowUserToDeleteRows = false;
-            carsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            carsGridView.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            carsGridView.RowHeadersVisible = true;
+            // Progress timer for loader feedback
+            _progressTimer = new Timer { Interval = 100 };
+            _progressTimer.Tick += (_, __) => _progressBar.Value = Math.Min(Loader.GetProgress(), 100);
 
-            // Progress Timer
-            progressTimer = new Timer();
-            progressTimer.Interval = 100;
-            progressTimer.Tick += ProgressTimer_Tick;
+            FormClosing += MainForm_FormClosing;
 
-            // Add controls to split container
-            splitContainer.Panel1.Controls.Add(brandsGridView);
-            splitContainer.Panel2.Controls.Add(carsGridView);
-
-            // Add controls to form in correct order
-            this.Controls.Add(splitContainer);
-            this.Controls.Add(progressBar);
-            this.Controls.Add(menuStrip);
-            
-            this.ResumeLayout(false);
-            this.PerformLayout();
+            ResumeLayout(false);
+            PerformLayout();
         }
 
-        private void InitializeData()
+        private void InitializeDataBinding()
         {
-            bindingSource = new BindingSource();
-            bindingSource.DataSource = new List<CarBrand>();
-            brandsGridView.DataSource = bindingSource;
+            _brands = new BindingList<ICarBrand>();
+            _bindingSource = new BindingSource { DataSource = _brands };
+            _bindingSource.AddingNew += (_, e) => e.NewObject = new PassengerCarBrand();
+            _brandsGrid.DataSource = _bindingSource;
         }
 
-        private void BrandsGridView_DataError(object sender, DataGridViewDataErrorEventArgs e)
-        {
-            // Suppress data binding errors
-            e.ThrowException = false;
-        }
-
-        private void BrandsGridView_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
-        {
-            // When a new row is added, ensure it has a bound object
-            for (int i = 0; i < e.RowCount; i++)
-            {
-                int rowIndex = e.RowIndex + i;
-                if (rowIndex < brandsGridView.Rows.Count)
-                {
-                    var row = brandsGridView.Rows[rowIndex];
-                    if (row.DataBoundItem == null && rowIndex == brandsGridView.Rows.Count - 1)
-                    {
-                        // This is the new row - create a default PassengerCar
-                        var newBrand = new PassengerCar
-                        {
-                            BrandName = "",
-                            ModelName = "",
-                            Horsepower = 0,
-                            MaxSpeed = 0
-                        };
-                        bindingSource.Add(newBrand);
-                    }
-                }
-            }
-        }
-
-        private void BrandsGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
-            if (e.RowIndex >= brandsGridView.Rows.Count) return;
-
-            var row = brandsGridView.Rows[e.RowIndex];
-            var brand = row.DataBoundItem as CarBrand;
-            
-            // Handle new row addition - update values if brand exists
-            if (brand != null)
-            {
-                // Update brand properties from cell values
-                if (e.ColumnIndex == brandsGridView.Columns["BrandName"].Index)
-                {
-                    brand.BrandName = row.Cells["BrandName"].Value?.ToString() ?? "";
-                }
-                else if (e.ColumnIndex == brandsGridView.Columns["ModelName"].Index)
-                {
-                    brand.ModelName = row.Cells["ModelName"].Value?.ToString() ?? "";
-                }
-                else if (e.ColumnIndex == brandsGridView.Columns["Horsepower"].Index)
-                {
-                    int.TryParse(row.Cells["Horsepower"].Value?.ToString(), out int hp);
-                    brand.Horsepower = hp;
-                }
-                else if (e.ColumnIndex == brandsGridView.Columns["MaxSpeed"].Index)
-                {
-                    int.TryParse(row.Cells["MaxSpeed"].Value?.ToString(), out int speed);
-                    brand.MaxSpeed = speed;
-                }
-            }
-
-            if (brand == null) return;
-
-            // Handle type change
-            if (e.ColumnIndex == brandsGridView.Columns["Type"].Index)
-            {
-                var newTypeValue = row.Cells["Type"].Value?.ToString();
-                if (Enum.TryParse<CarType>(newTypeValue, out CarType newType))
-                {
-                    if (brand.Type != newType)
-                    {
-                        CarBrand newBrand;
-                        if (newType == CarType.Passenger)
-                        {
-                            newBrand = new PassengerCar
-                            {
-                                BrandName = brand.BrandName,
-                                ModelName = brand.ModelName,
-                                Horsepower = brand.Horsepower,
-                                MaxSpeed = brand.MaxSpeed
-                            };
-                        }
-                        else
-                        {
-                            newBrand = new Truck
-                            {
-                                BrandName = brand.BrandName,
-                                ModelName = brand.ModelName,
-                                Horsepower = brand.Horsepower,
-                                MaxSpeed = brand.MaxSpeed
-                            };
-                        }
-
-                        int index = bindingSource.IndexOf(brand);
-                        bindingSource.Remove(brand);
-                        bindingSource.Insert(index, newBrand);
-                        brandsGridView.ClearSelection();
-                        if (index < brandsGridView.Rows.Count)
-                        {
-                            brandsGridView.Rows[index].Selected = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        private void BrandsGridView_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        private void BrandsGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
         {
             if (e.RowIndex < 0) return;
 
-            var row = brandsGridView.Rows[e.RowIndex];
-            var brand = row.DataBoundItem as CarBrand;
-            if (brand == null) return;
+            var row = _brandsGrid.Rows[e.RowIndex];
+            if (row.DataBoundItem is not ICarBrand brand) return;
 
-            // Set Type column value
-            if (e.ColumnIndex == brandsGridView.Columns["Type"].Index)
-            {
-                e.Value = brand.Type.ToString();
-            }
-
-            // Set row color based on type
-            if (brand.Type == CarType.Passenger)
-            {
-                row.DefaultCellStyle.BackColor = Color.LightBlue;
-            }
-            else
-            {
-                row.DefaultCellStyle.BackColor = Color.LightCoral;
-            }
+            row.DefaultCellStyle.BackColor = brand.Type == CarType.Passenger
+                ? Color.LightSkyBlue
+                : Color.LightSalmon;
         }
 
-        private void BrandsGridView_SelectionChanged(object sender, EventArgs e)
+        private void BrandsGrid_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
         {
-            if (brandsGridView.SelectedRows.Count == 0)
+            if (e.RowIndex < 0 || e.RowIndex >= _brands.Count) return;
+            if (_brandsGrid.Columns[e.ColumnIndex].Name != "Type") return;
+
+            if (_brandsGrid.Rows[e.RowIndex].DataBoundItem is not ICarBrand currentBrand) return;
+
+            var selectedValue = _brandsGrid.Rows[e.RowIndex].Cells["Type"].Value;
+            if (selectedValue == null) return;
+
+            var newType = (CarType)Enum.Parse(typeof(CarType), selectedValue.ToString()!);
+            if (currentBrand.Type == newType) return;
+
+            var replacement = CarBrandBase.CloneWithType(currentBrand, newType);
+            _brands[e.RowIndex] = replacement;
+            _bindingSource.ResetBindings(false);
+        }
+
+        private void BrandsGrid_SelectionChanged(object? sender, EventArgs e)
+        {
+            if (_brandsGrid.SelectedRows.Count == 0)
             {
-                carsGridView.Rows.Clear();
+                _carsGrid.Rows.Clear();
+                _carsGrid.Columns.Clear();
                 return;
             }
 
-            var selectedRow = brandsGridView.SelectedRows[0];
-            var brand = selectedRow.DataBoundItem as CarBrand;
-            if (brand == null) return;
+            var selectedRow = _brandsGrid.SelectedRows[0];
+            if (selectedRow.DataBoundItem is not ICarBrand brand) return;
 
             selectedRow.Tag = brand;
-
             LoadCarsForBrand(brand);
         }
 
-        private void LoadCarsForBrand(CarBrand brand)
+        private void LoadCarsForBrand(ICarBrand brand)
         {
-            carsGridView.Rows.Clear();
-            carsGridView.Columns.Clear();
+            _carsGrid.Rows.Clear();
+            _carsGrid.Columns.Clear();
 
-            // Setup columns based on car type
             if (brand.Type == CarType.Passenger)
             {
-                carsGridView.Columns.Add("RegistrationNumber", "Registration Number");
-                carsGridView.Columns.Add("MultimediaName", "Multimedia Name");
-                carsGridView.Columns.Add("AirbagCount", "Airbag Count");
+                _carsGrid.Columns.Add("RegNumber", "Регистрационный номер");
+                _carsGrid.Columns.Add("Multimedia", "Мультимедиа");
+                _carsGrid.Columns.Add("Airbags", "Подушек безопасности");
             }
             else
             {
-                carsGridView.Columns.Add("RegistrationNumber", "Registration Number");
-                carsGridView.Columns.Add("WheelCount", "Number of Wheels");
-                carsGridView.Columns.Add("BodyVolume", "Body Volume (m³)");
+                _carsGrid.Columns.Add("RegNumber", "Регистрационный номер");
+                _carsGrid.Columns.Add("WheelCount", "Кол-во колес");
+                _carsGrid.Columns.Add("BodyVolume", "Объем кузова (м³)");
             }
 
-            // Start loading in background thread
-            progressBar.Value = 0;
-            progressTimer.Start();
+            _progressBar.Value = 0;
+            _progressTimer.Start();
 
-            loadingThread = new Thread(() =>
+            _loadingThread = new Thread(() =>
             {
                 Loader.Load(brand);
-                this.Invoke(new Action(() =>
+                BeginInvoke(new Action(() =>
                 {
-                    var cars = Loader.GetCars(brand);
-                    foreach (var car in cars)
+                    foreach (var car in Loader.GetCars(brand))
                     {
-                        if (car is PassengerCarInstance passengerCar)
+                        if (brand.Type == CarType.Passenger && car is PassengerCarInstance passenger)
                         {
-                            carsGridView.Rows.Add(
-                                passengerCar.RegistrationNumber,
-                                passengerCar.MultimediaName,
-                                passengerCar.AirbagCount
-                            );
+                            _carsGrid.Rows.Add(passenger.RegistrationNumber, passenger.MultimediaName, passenger.AirbagCount);
                         }
-                        else if (car is TruckInstance truck)
+                        else if (brand.Type == CarType.Truck && car is TruckInstance truck)
                         {
-                            carsGridView.Rows.Add(
-                                truck.RegistrationNumber,
-                                truck.WheelCount,
-                                truck.BodyVolume
-                            );
+                            _carsGrid.Rows.Add(truck.RegistrationNumber, truck.WheelCount, truck.BodyVolume);
                         }
                     }
-                    progressTimer.Stop();
-                    progressBar.Value = 100;
+
+                    _progressTimer.Stop();
+                    _progressBar.Value = 100;
                 }));
-            });
-            loadingThread.Start();
+            })
+            { IsBackground = true };
+
+            _loadingThread.Start();
         }
 
-        private void ProgressTimer_Tick(object sender, EventArgs e)
+        private void SaveMenu_Click(object? sender, EventArgs e)
         {
-            int progress = Loader.GetProgress();
-            progressBar.Value = Math.Min(progress, 100);
-        }
-
-        private void SaveItem_Click(object sender, EventArgs e)
-        {
-            SaveFileDialog saveDialog = new SaveFileDialog
+            using var saveDialog = new SaveFileDialog
             {
                 Filter = "XML files (*.xml)|*.xml",
-                DefaultExt = "xml"
+                Title = "Сохранить список марок"
             };
 
-            if (saveDialog.ShowDialog() == DialogResult.OK)
+            if (saveDialog.ShowDialog() != DialogResult.OK) return;
+
+            try
             {
-                try
-                {
-                    var brands = bindingSource.Cast<CarBrand>().ToList();
-                    XmlSerializer serializer = new XmlSerializer(typeof(List<CarBrand>), new[] { typeof(PassengerCar), typeof(Truck) });
-                    using (FileStream stream = new FileStream(saveDialog.FileName, FileMode.Create))
-                    {
-                        serializer.Serialize(stream, brands);
-                    }
-                    MessageBox.Show("Brands saved successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error saving: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                var data = _brands.OfType<CarBrandBase>().Select(b => CarBrandBase.CloneWithType(b, b.Type)).ToList();
+                using var file = new FileStream(saveDialog.FileName, FileMode.Create);
+                BrandSerializer.Serialize(file, data);
+                MessageBox.Show("Список марок сохранён.", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private void LoadItem_Click(object sender, EventArgs e)
+        private void LoadMenu_Click(object? sender, EventArgs e)
         {
-            OpenFileDialog openDialog = new OpenFileDialog
+            using var openDialog = new OpenFileDialog
             {
-                Filter = "XML files (*.xml)|*.xml"
+                Filter = "XML files (*.xml)|*.xml",
+                Title = "Загрузить список марок"
             };
 
-            if (openDialog.ShowDialog() == DialogResult.OK)
+            if (openDialog.ShowDialog() != DialogResult.OK) return;
+
+            try
             {
-                try
+                using var file = new FileStream(openDialog.FileName, FileMode.Open);
+                if (BrandSerializer.Deserialize(file) is List<CarBrandBase> loaded)
                 {
-                    XmlSerializer serializer = new XmlSerializer(typeof(List<CarBrand>), new[] { typeof(PassengerCar), typeof(Truck) });
-                    List<CarBrand> brands;
-                    using (FileStream stream = new FileStream(openDialog.FileName, FileMode.Open))
-                    {
-                        brands = (List<CarBrand>)serializer.Deserialize(stream);
-                    }
-                    bindingSource.DataSource = brands;
-                    brandsGridView.Refresh();
-                    brandsGridView.Invalidate();
-                    MessageBox.Show("Brands loaded successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _brands = new BindingList<ICarBrand>(loaded.Cast<ICarBrand>().ToList());
+                    _bindingSource.DataSource = _brands;
+                    _bindingSource.ResetBindings(false);
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error loading: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private void ExitItem_Click(object sender, EventArgs e)
+        private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
         {
-            Application.Exit();
+            if (_loadingThread != null && _loadingThread.IsAlive)
+            {
+                _loadingThread.Join(200);
+            }
         }
     }
 }
