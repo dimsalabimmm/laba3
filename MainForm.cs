@@ -27,6 +27,14 @@ namespace Laba3
         private CarType _currentBrandType;
         private bool _isArenaBattleActive;
 
+        // Loader management
+        private readonly Dictionary<string, LoaderClient> _loaders = new Dictionary<string, LoaderClient>();
+        private readonly Dictionary<string, Panel> _loaderStatusPanels = new Dictionary<string, Panel>();
+        private Panel _loadersPanel;
+        private Button _addLoaderButton;
+        private TextBox _loaderIpTextBox;
+        private TextBox _loaderPortTextBox;
+
         private readonly Color _passengerColor = Color.FromArgb(210, 236, 255);
         private readonly Color _truckColor = Color.FromArgb(255, 232, 208);
         private readonly Color _gridAccent = Color.FromArgb(42, 48, 66);
@@ -68,6 +76,67 @@ namespace Laba3
             menuStrip.Items.Add(fileMenu);
             MainMenuStrip = menuStrip;
             Controls.Add(menuStrip);
+
+            // Loaders management panel
+            var loadersPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 60,
+                BackColor = Color.FromArgb(240, 242, 247),
+                Padding = new Padding(10)
+            };
+
+            var ipLabel = new Label
+            {
+                Text = "IP:",
+                Location = new Point(10, 20),
+                AutoSize = true
+            };
+
+            _loaderIpTextBox = new TextBox
+            {
+                Location = new Point(40, 17),
+                Width = 120,
+                Text = "127.0.0.1"
+            };
+
+            var portLabel = new Label
+            {
+                Text = "Port:",
+                Location = new Point(170, 20),
+                AutoSize = true
+            };
+
+            _loaderPortTextBox = new TextBox
+            {
+                Location = new Point(210, 17),
+                Width = 80,
+                Text = "8080"
+            };
+
+            _addLoaderButton = new Button
+            {
+                Text = "Добавить лоадер",
+                Location = new Point(300, 15),
+                Width = 140,
+                Height = 30,
+                BackColor = Color.FromArgb(76, 175, 80),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            _addLoaderButton.FlatAppearance.BorderSize = 0;
+            _addLoaderButton.Click += AddLoaderButton_Click;
+
+            _loadersPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = Color.Transparent
+            };
+
+            loadersPanel.Controls.AddRange(new Control[] { ipLabel, _loaderIpTextBox, portLabel, _loaderPortTextBox, _addLoaderButton, _loadersPanel });
+
+            Controls.Add(loadersPanel);
 
             // Progress bar
             _progressBar = new ProgressBar
@@ -643,6 +712,177 @@ namespace Laba3
             }
         }
 
+        private async void AddLoaderButton_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_loaderIpTextBox.Text) || string.IsNullOrWhiteSpace(_loaderPortTextBox.Text))
+            {
+                MessageBox.Show(this, "Введите IP и Port!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!int.TryParse(_loaderPortTextBox.Text, out int port))
+            {
+                MessageBox.Show(this, "Некорректный порт!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string key = $"{_loaderIpTextBox.Text}:{port}";
+
+            if (_loaders.ContainsKey(key))
+            {
+                MessageBox.Show(this, "Лоадер уже добавлен!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var client = new LoaderClient(_loaderIpTextBox.Text, port);
+            client.BrandReceived += (brand) =>
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action(() => AddBrandFromLoader(brand)));
+                }
+                else
+                {
+                    AddBrandFromLoader(brand);
+                }
+            };
+
+            client.ConnectionStatusChanged += (isConnected) =>
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action(() => UpdateLoaderStatus(key, isConnected)));
+                }
+                else
+                {
+                    UpdateLoaderStatus(key, isConnected);
+                }
+            };
+
+            _loaders[key] = client;
+            CreateLoaderStatusPanel(key, _loaderIpTextBox.Text, port);
+            await client.ConnectAsync();
+        }
+
+        private void AddBrandFromLoader(CarBrand brand)
+        {
+            if (brand != null)
+            {
+                _brands.Add(brand);
+            }
+        }
+
+        private void CreateLoaderStatusPanel(string key, string ip, int port)
+        {
+            var panel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 40,
+                BackColor = Color.White,
+                Margin = new Padding(5),
+                Padding = new Padding(5)
+            };
+
+            var statusCircle = new Panel
+            {
+                Width = 20,
+                Height = 20,
+                Location = new Point(10, 10),
+                BackColor = Color.Red,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            statusCircle.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.FillEllipse(new SolidBrush(statusCircle.BackColor), 0, 0, statusCircle.Width - 1, statusCircle.Height - 1);
+            };
+
+            var label = new Label
+            {
+                Text = $"{ip}:{port}",
+                Location = new Point(40, 10),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9F)
+            };
+
+            var requestButton = new Button
+            {
+                Text = "Запросить",
+                Dock = DockStyle.Right,
+                Width = 90,
+                BackColor = Color.FromArgb(33, 150, 243),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            requestButton.FlatAppearance.BorderSize = 0;
+            requestButton.Click += (s, e) =>
+            {
+                if (_loaders.ContainsKey(key) && _loaders[key].IsConnected)
+                {
+                    // Отправляем бинарный запрос (просто байт 1 для запроса данных)
+                    byte[] request = new byte[] { 1 };
+                    _loaders[key].SendRequest(request);
+                }
+            };
+
+            var removeButton = new Button
+            {
+                Text = "Удалить",
+                Dock = DockStyle.Right,
+                Width = 80,
+                BackColor = Color.FromArgb(244, 67, 54),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            removeButton.FlatAppearance.BorderSize = 0;
+            removeButton.Click += (s, e) =>
+            {
+                if (_loaders.ContainsKey(key))
+                {
+                    _loaders[key].Disconnect();
+                    _loaders.Remove(key);
+                }
+                _loaderStatusPanels.Remove(key);
+                _loadersPanel.Controls.Remove(panel);
+            };
+
+            panel.Controls.AddRange(new Control[] { statusCircle, label, removeButton, requestButton });
+            panel.Tag = statusCircle;
+
+            _loaderStatusPanels[key] = panel;
+            _loadersPanel.Controls.Add(panel);
+            _loadersPanel.Controls.SetChildIndex(panel, 0);
+        }
+
+        private void UpdateLoaderStatus(string key, bool isConnected)
+        {
+            if (_loaderStatusPanels.ContainsKey(key))
+            {
+                var panel = _loaderStatusPanels[key];
+                var statusCircle = panel.Tag as Panel;
+                if (statusCircle != null)
+                {
+                    statusCircle.BackColor = isConnected ? Color.Green : Color.Red;
+                    statusCircle.Invalidate();
+                }
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            foreach (var loader in _loaders.Values)
+            {
+                loader.Disconnect();
+            }
+            _loaders.Clear();
+
+            if (_loadCts != null)
+            {
+                _loadCts.Cancel();
+            }
+            base.OnFormClosing(e);
+        }
     }
 }
 
