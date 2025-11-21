@@ -12,6 +12,7 @@ namespace Laba3
     public interface ICar
     {
         string RegistrationNumber { get; set; }
+        double GetStrength();
     }
 
     [Serializable]
@@ -46,6 +47,11 @@ namespace Laba3
         public string RegistrationNumber { get; set; } = string.Empty;
         public string MultimediaName { get; set; } = string.Empty;
         public int AirbagCount { get; set; }
+
+        public double GetStrength()
+        {
+            return AirbagCount;
+        }
     }
 
     [Serializable]
@@ -54,6 +60,11 @@ namespace Laba3
         public string RegistrationNumber { get; set; } = string.Empty;
         public int WheelCount { get; set; }
         public double BodyVolume { get; set; }
+
+        public double GetStrength()
+        {
+            return BodyVolume;
+        }
     }
 }
 

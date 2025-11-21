@@ -23,6 +23,9 @@ namespace Laba3
         private ProgressBar _progressBar;
         private Timer _progressTimer;
         private CancellationTokenSource _loadCts;
+        private Button _arenaButton;
+        private CarType _currentBrandType;
+        private bool _isArenaBattleActive;
 
         private readonly Color _passengerColor = Color.FromArgb(210, 236, 255);
         private readonly Color _truckColor = Color.FromArgb(255, 232, 208);
@@ -72,7 +75,7 @@ namespace Laba3
                 Dock = DockStyle.Bottom,
                 Height = 24,
                 Style = ProgressBarStyle.Continuous,
-                Visible = false
+                Visible = true
             };
             Controls.Add(_progressBar);
 
@@ -190,12 +193,27 @@ namespace Laba3
             };
             _carsGrid.EnableHeadersVisualStyles = false;
 
+            // Arena button
+            _arenaButton = new Button
+            {
+                Text = "Арена",
+                Dock = DockStyle.Top,
+                Height = 40,
+                BackColor = Color.FromArgb(220, 53, 69),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            _arenaButton.FlatAppearance.BorderSize = 0;
+            _arenaButton.Click += ArenaButton_Click;
+
             split.Panel2.Controls.Add(new Panel
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(12),
                 BackColor = Color.Transparent,
-                Controls = { _carsGrid }
+                Controls = { _carsGrid, _arenaButton }
             });
 
             // Progress timer
@@ -280,7 +298,6 @@ namespace Laba3
 
             ConfigureCarsGrid(brand.Type);
             _progressBar.Value = 0;
-            _progressBar.Visible = true;
             _progressTimer.Start();
 
             try
@@ -295,14 +312,14 @@ namespace Laba3
             finally
             {
                 _progressTimer.Stop();
-                _progressBar.Value = _progressBar.Maximum;
-                _progressBar.Visible = false;
+                _progressBar.Value = 0;
             }
         }
 
         private void ConfigureCarsGrid(CarType type)
         {
             _carsGrid.Columns.Clear();
+            _currentBrandType = type;
 
             _carsGrid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -344,13 +361,20 @@ namespace Laba3
 
             foreach (var car in cars)
             {
+                DataGridViewRow row;
                 if (type == CarType.Passenger && car is PassengerCar passenger)
                 {
-                    _carsGrid.Rows.Add(passenger.RegistrationNumber, passenger.MultimediaName, passenger.AirbagCount);
+                    row = _carsGrid.Rows[_carsGrid.Rows.Add(passenger.RegistrationNumber, passenger.MultimediaName, passenger.AirbagCount)];
+                    row.Tag = passenger;
                 }
                 else if (type == CarType.Truck && car is Truck truck)
                 {
-                    _carsGrid.Rows.Add(truck.RegistrationNumber, truck.WheelCount, truck.BodyVolume);
+                    row = _carsGrid.Rows[_carsGrid.Rows.Add(truck.RegistrationNumber, truck.WheelCount, truck.BodyVolume)];
+                    row.Tag = truck;
+                }
+                else
+                {
+                    continue;
                 }
             }
         }
@@ -471,6 +495,154 @@ namespace Laba3
                 _loadCts.Cancel();
             }
         }
+
+        private void ArenaButton_Click(object sender, EventArgs e)
+        {
+            if (_isArenaBattleActive)
+            {
+                MessageBox.Show(this, "Битва уже идет!", "Арена", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (_carsGrid.Rows.Count == 0)
+            {
+                MessageBox.Show(this, "Нет автомобилей для битвы!", "Арена", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Добавляем строку "Арена" в середину таблицы
+            int middleIndex = _carsGrid.Rows.Count / 2;
+            var arenaRow = new DataGridViewRow();
+            arenaRow.CreateCells(_carsGrid, "Арена", "Арена", "Арена");
+            _carsGrid.Rows.Insert(middleIndex, arenaRow);
+            arenaRow.Tag = "ARENA";
+            arenaRow.DefaultCellStyle.BackColor = Color.FromArgb(139, 0, 0);
+            arenaRow.DefaultCellStyle.ForeColor = Color.White;
+            arenaRow.DefaultCellStyle.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+
+            _arenaButton.Enabled = false;
+            _isArenaBattleActive = true;
+
+            _ = StartArenaBattleAsync();
+        }
+
+        private async Task StartArenaBattleAsync()
+        {
+            // Находим индекс строки "Арена"
+            int arenaIndex = -1;
+            for (int i = 0; i < _carsGrid.Rows.Count; i++)
+            {
+                if (_carsGrid.Rows[i].Tag != null && _carsGrid.Rows[i].Tag.ToString() == "ARENA")
+                {
+                    arenaIndex = i;
+                    break;
+                }
+            }
+
+            if (arenaIndex == -1)
+            {
+                _isArenaBattleActive = false;
+                _arenaButton.Enabled = true;
+                return;
+            }
+
+            while (true)
+            {
+                await Task.Delay(1500); // Увеличена задержка между битвами
+
+                // Находим верхнюю строку (выше арены)
+                DataGridViewRow topCar = null;
+                for (int i = arenaIndex - 1; i >= 0; i--)
+                {
+                    if (_carsGrid.Rows[i].Tag != null && _carsGrid.Rows[i].Tag.ToString() != "ARENA")
+                    {
+                        topCar = _carsGrid.Rows[i];
+                        break;
+                    }
+                }
+
+                // Находим нижнюю строку (ниже арены)
+                DataGridViewRow bottomCar = null;
+                for (int i = arenaIndex + 1; i < _carsGrid.Rows.Count; i++)
+                {
+                    if (_carsGrid.Rows[i].Tag != null && _carsGrid.Rows[i].Tag.ToString() != "ARENA")
+                    {
+                        bottomCar = _carsGrid.Rows[i];
+                        break;
+                    }
+                }
+
+                // Если нет строк с обеих сторон - битва окончена
+                if (topCar == null || bottomCar == null)
+                {
+                    break;
+                }
+
+                var car1 = topCar.Tag as ICar;
+                var car2 = bottomCar.Tag as ICar;
+                
+                if (car1 == null || car2 == null)
+                {
+                    continue;
+                }
+
+                var strength1 = car1.GetStrength();
+                var strength2 = car2.GetStrength();
+
+                // Подсвечиваем сражающихся
+                topCar.DefaultCellStyle.BackColor = Color.Yellow;
+                bottomCar.DefaultCellStyle.BackColor = Color.Yellow;
+                _carsGrid.Refresh();
+                await Task.Delay(1000); // Увеличена задержка подсветки
+
+                // Удаляем проигравшего
+                DataGridViewRow loser = strength1 < strength2 ? topCar : bottomCar;
+                DataGridViewRow winner = strength1 >= strength2 ? topCar : bottomCar;
+
+                // Возвращаем цвет победителю
+                if (winner.Tag is PassengerCar)
+                {
+                    winner.DefaultCellStyle.BackColor = _passengerColor;
+                }
+                else if (winner.Tag is Truck)
+                {
+                    winner.DefaultCellStyle.BackColor = _truckColor;
+                }
+
+                int loserIndex = loser.Index;
+                _carsGrid.Rows.Remove(loser);
+
+                // Обновляем индекс арены, если удалили строку выше неё
+                if (loserIndex < arenaIndex)
+                {
+                    arenaIndex--;
+                }
+
+                _carsGrid.Refresh();
+            }
+
+            _isArenaBattleActive = false;
+            _arenaButton.Enabled = true;
+
+            var remainingCars = 0;
+            foreach (DataGridViewRow row in _carsGrid.Rows)
+            {
+                if (row.Tag != null && row.Tag.ToString() != "ARENA")
+                {
+                    remainingCars++;
+                }
+            }
+
+            if (remainingCars == 1)
+            {
+                MessageBox.Show(this, "Битва завершена! Остался один победитель!", "Арена", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, "Битва завершена!", "Арена", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
     }
 }
 
