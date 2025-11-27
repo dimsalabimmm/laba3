@@ -27,7 +27,6 @@ namespace Laba3
         private CarType _currentBrandType;
         private bool _isArenaBattleActive;
 
-        // Loader management
         private readonly Dictionary<string, LoaderClient> _loaders = new Dictionary<string, LoaderClient>();
         private readonly Dictionary<string, Panel> _loaderStatusPanels = new Dictionary<string, Panel>();
         private readonly Dictionary<int, LoaderServer> _localServers = new Dictionary<int, LoaderServer>();
@@ -45,58 +44,74 @@ namespace Laba3
             InitializeComponent();
             InitializeDataBinding();
             SeedInitialBrands();
-            StartLocalServer();
         }
 
-        private void StartLocalServer()
+        private bool IsLocalIpAddress(string ipAddress)
         {
+            string ipLower = ipAddress.ToLower().Trim();
+            
+            if (ipLower == "127.0.0.1" || ipLower == "localhost" || ipLower == "0.0.0.0")
+            {
+                return true;
+            }
+
             try
             {
-                // Start multiple servers on different ports (8080-8084)
-                for (int port = 8080; port <= 8084; port++)
-                {
-                    try
-                    {
-                        var server = new LoaderServer("0.0.0.0", port);
-                        server.Start();
-                        _localServers[port] = server;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Port might be in use, skip it
-                        System.Diagnostics.Debug.WriteLine($"Failed to start server on port {port}: {ex.Message}");
-                    }
-                }
-                
-                // Get all available IP addresses on this machine
-                var availableIPs = new System.Text.StringBuilder();
-                availableIPs.AppendLine($"Локальные серверы запущены на портах: {string.Join(", ", _localServers.Keys)}");
-                availableIPs.AppendLine("\nВы можете подключиться используя любой из этих адресов:");
-                
-                foreach (var port in _localServers.Keys)
-                {
-                    availableIPs.AppendLine($"• 127.0.0.1:{port} (localhost)");
-                }
-                
-                // Get network IPs
                 var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
                 foreach (var ip in host.AddressList)
                 {
                     if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                     {
-                        foreach (var port in _localServers.Keys)
+                        if (ip.ToString() == ipAddress)
                         {
-                            availableIPs.AppendLine($"• {ip}:{port} (сетевой адрес)");
+                            return true;
                         }
-                        break; // Only show first network IP to avoid cluttering
                     }
                 }
-                
-                MessageBox.Show(this, availableIPs.ToString(), "Серверы запущены", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch { }
+
+            return false;
+        }
+
+        private bool IsPortAvailable(int port)
+        {
+            try
+            {
+                var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, port);
+                listener.Start();
+                listener.Stop();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool EnsureServerOnPort(int port)
+        {
+            if (_localServers.ContainsKey(port))
+            {
+                return true;
+            }
+
+            if (!IsPortAvailable(port))
+            {
+                return true;
+            }
+
+            try
+            {
+                var server = new LoaderServer("0.0.0.0", port);
+                server.Start();
+                _localServers[port] = server;
+                return true;
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Не удалось запустить локальные серверы: {ex.Message}", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, $"Не удалось создать сервер на порту {port}: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
         }
 
@@ -109,7 +124,6 @@ namespace Laba3
             MinimumSize = new Size(1100, 680);
             BackColor = Color.FromArgb(245, 247, 252);
 
-            // Menu
             var menuStrip = new MenuStrip
             {
                 BackColor = Color.FromArgb(32, 36, 48),
@@ -131,7 +145,6 @@ namespace Laba3
             MainMenuStrip = menuStrip;
             Controls.Add(menuStrip);
 
-            // Loaders management panel
             var loadersPanel = new Panel
             {
                 Dock = DockStyle.Top,
@@ -192,12 +205,10 @@ namespace Laba3
 
             loadersPanel.Controls.AddRange(new Control[] { ipLabel, _loaderIpTextBox, portLabel, _loaderPortTextBox, _addLoaderButton, _loadersPanel });
             
-            // Set size after adding to parent so ClientSize is correct
             _loadersPanel.Size = new Size(loadersPanel.ClientSize.Width - 20, loadersPanel.ClientSize.Height - 60);
 
             Controls.Add(loadersPanel);
 
-            // Progress bar
             _progressBar = new ProgressBar
             {
                 Dock = DockStyle.Bottom,
@@ -207,7 +218,6 @@ namespace Laba3
             };
             Controls.Add(_progressBar);
 
-            // Split container
             var split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
@@ -217,7 +227,6 @@ namespace Laba3
             Controls.Add(split);
             Controls.SetChildIndex(split, 0);
 
-            // Brands grid
             _brandsGrid = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -298,7 +307,6 @@ namespace Laba3
                 Controls = { _brandsGrid }
             });
 
-            // Cars grid
             _carsGrid = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -321,7 +329,6 @@ namespace Laba3
             };
             _carsGrid.EnableHeadersVisualStyles = false;
 
-            // Arena button
             _arenaButton = new Button
             {
                 Text = "Арена",
@@ -344,7 +351,6 @@ namespace Laba3
                 Controls = { _carsGrid, _arenaButton }
             });
 
-            // Progress timer
             _progressTimer = new Timer { Interval = 120 };
             _progressTimer.Tick += ProgressTimer_Tick;
 
@@ -435,7 +441,6 @@ namespace Laba3
             }
             catch (OperationCanceledException)
             {
-                // ignore
             }
             finally
             {
@@ -638,7 +643,6 @@ namespace Laba3
                 return;
             }
 
-            // Добавляем строку "Арена" в середину таблицы
             int middleIndex = _carsGrid.Rows.Count / 2;
             var arenaRow = new DataGridViewRow();
             arenaRow.CreateCells(_carsGrid, "Арена", "Арена", "Арена");
@@ -656,7 +660,6 @@ namespace Laba3
 
         private async Task StartArenaBattleAsync()
         {
-            // Находим индекс строки "Арена"
             int arenaIndex = -1;
             for (int i = 0; i < _carsGrid.Rows.Count; i++)
             {
@@ -676,9 +679,8 @@ namespace Laba3
 
             while (true)
             {
-                await Task.Delay(1500); // Увеличена задержка между битвами
+                await Task.Delay(1500);
 
-                // Находим верхнюю строку (выше арены)
                 DataGridViewRow topCar = null;
                 for (int i = arenaIndex - 1; i >= 0; i--)
                 {
@@ -689,7 +691,6 @@ namespace Laba3
                     }
                 }
 
-                // Находим нижнюю строку (ниже арены)
                 DataGridViewRow bottomCar = null;
                 for (int i = arenaIndex + 1; i < _carsGrid.Rows.Count; i++)
                 {
@@ -700,7 +701,6 @@ namespace Laba3
                     }
                 }
 
-                // Если нет строк с обеих сторон - битва окончена
                 if (topCar == null || bottomCar == null)
                 {
                     break;
@@ -717,17 +717,14 @@ namespace Laba3
                 var strength1 = car1.GetStrength();
                 var strength2 = car2.GetStrength();
 
-                // Подсвечиваем сражающихся
                 topCar.DefaultCellStyle.BackColor = Color.Yellow;
                 bottomCar.DefaultCellStyle.BackColor = Color.Yellow;
                 _carsGrid.Refresh();
-                await Task.Delay(1000); // Увеличена задержка подсветки
+                await Task.Delay(1000);
 
-                // Удаляем проигравшего
                 DataGridViewRow loser = strength1 < strength2 ? topCar : bottomCar;
                 DataGridViewRow winner = strength1 >= strength2 ? topCar : bottomCar;
 
-                // Возвращаем цвет победителю
                 if (winner.Tag is PassengerCar)
                 {
                     winner.DefaultCellStyle.BackColor = _passengerColor;
@@ -740,7 +737,6 @@ namespace Laba3
                 int loserIndex = loser.Index;
                 _carsGrid.Rows.Remove(loser);
 
-                // Обновляем индекс арены, если удалили строку выше неё
                 if (loserIndex < arenaIndex)
                 {
                     arenaIndex--;
@@ -793,6 +789,15 @@ namespace Laba3
                 return;
             }
 
+            string ipInput = _loaderIpTextBox.Text.Trim();
+            if (IsLocalIpAddress(ipInput))
+            {
+                if (!EnsureServerOnPort(port))
+                {
+                    return;
+                }
+            }
+
             var client = new LoaderClient(_loaderIpTextBox.Text, port);
             client.BrandReceived += (brand) =>
             {
@@ -821,21 +826,17 @@ namespace Laba3
             _loaders[key] = client;
             CreateLoaderStatusPanel(key, _loaderIpTextBox.Text, port);
             
-            // Disable the add button and show connecting status
             _addLoaderButton.Enabled = false;
             _addLoaderButton.Text = "Подключение...";
             
             try
             {
-                // Try to connect with timeout and error handling
                 var errorMessage = await client.ConnectAsync();
                 
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
-                    // Connection failed - show error and remove the loader
                     MessageBox.Show(this, errorMessage, "Ошибка подключения", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     
-                    // Clean up failed loader
                     _loaders.Remove(key);
                     if (_loaderStatusPanels.ContainsKey(key))
                     {
@@ -847,13 +848,11 @@ namespace Laba3
                 }
                 else
                 {
-                    // Connection successful
                     MessageBox.Show(this, $"Успешно подключено к {_loaderIpTextBox.Text}:{port}", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             finally
             {
-                // Re-enable the add button
                 _addLoaderButton.Enabled = true;
                 _addLoaderButton.Text = "Добавить лоадер";
             }
@@ -903,10 +902,10 @@ namespace Laba3
 
             var requestButton = new Button
             {
-                Text = "Запросить",
+                Text = "Старт",
                 Dock = DockStyle.Right,
                 Width = 90,
-                BackColor = Color.FromArgb(33, 150, 243),
+                BackColor = Color.FromArgb(76, 175, 80),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat
             };
@@ -918,15 +917,25 @@ namespace Laba3
                     return;
                 }
 
-                if (_loaders[key].IsConnected)
+                var loader = _loaders[key];
+                
+                if (!loader.IsConnected)
                 {
-                    // Send a single request
-                    byte[] request = new byte[] { 1 };
-                    _loaders[key].SendRequest(request);
+                    MessageBox.Show(this, "Лоадер не подключен!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (loader.IsRequestingData)
+                {
+                    loader.StopRequestingData();
+                    requestButton.Text = "Старт";
+                    requestButton.BackColor = Color.FromArgb(76, 175, 80);
                 }
                 else
                 {
-                    MessageBox.Show(this, "Лоадер не подключен!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    loader.StartRequestingData();
+                    requestButton.Text = "Стоп";
+                    requestButton.BackColor = Color.FromArgb(255, 152, 0);
                 }
             };
 
@@ -944,23 +953,19 @@ namespace Laba3
             {
                 try
                 {
-                    // Disconnect and remove the loader
                     if (_loaders.ContainsKey(key))
                     {
                         _loaders[key]?.Disconnect();
                         _loaders.Remove(key);
                     }
                     
-                    // Remove from status panels dictionary
                     _loaderStatusPanels.Remove(key);
                     
-                    // Remove the panel from the UI
                     if (_loadersPanel != null && panel != null && _loadersPanel.Controls.Contains(panel))
                     {
                         _loadersPanel.Controls.Remove(panel);
                     }
                     
-                    // Dispose the panel to free resources
                     panel?.Dispose();
                 }
                 catch (Exception ex)
@@ -993,14 +998,12 @@ namespace Laba3
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            // Disconnect all loaders
             foreach (var loader in _loaders.Values)
             {
                 loader.Disconnect();
             }
             _loaders.Clear();
 
-            // Stop all local servers
             foreach (var server in _localServers.Values)
             {
                 server?.Stop();
@@ -1015,4 +1018,3 @@ namespace Laba3
         }
     }
 }
-

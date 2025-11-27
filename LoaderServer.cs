@@ -41,7 +41,6 @@ namespace Laba3
                 _isRunning = true;
 
                 Task.Run(() => AcceptClients());
-                Task.Run(() => GenerateAndSendBrands());
             }
             catch (Exception ex)
             {
@@ -79,7 +78,6 @@ namespace Laba3
                     {
                         _clients.Add(client);
                     }
-                    // Start listening for requests from this client
                     _ = Task.Run(() => HandleClientRequests(client));
                 }
                 catch
@@ -103,15 +101,13 @@ namespace Laba3
                         int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                         if (bytesRead > 0)
                         {
-                            // Client sent a request, send a brand immediately
                             var brand = GenerateRandomBrand();
                             SendBrand(client, brand);
                         }
                     }
-                    await Task.Delay(100); // Small delay to prevent busy waiting
+                    await Task.Delay(100);
                 }
                 
-                // Normal exit: cleanup resources
                 lock (_clientsLock)
                 {
                     if (_clients.Contains(client))
@@ -129,7 +125,6 @@ namespace Laba3
             }
             catch
             {
-                // Exception exit: cleanup resources
                 lock (_clientsLock)
                 {
                     if (_clients.Contains(client))
@@ -143,50 +138,6 @@ namespace Laba3
                     client.Close();
                 }
                 catch { }
-            }
-        }
-
-        private async Task GenerateAndSendBrands()
-        {
-            while (_isRunning)
-            {
-                await Task.Delay(_random.Next(2000, 5000)); // Генерируем марку каждые 2-5 секунд
-
-                var brand = GenerateRandomBrand();
-
-                lock (_clientsLock)
-                {
-                    var disconnectedClients = new List<TcpClient>();
-
-                    foreach (var client in _clients)
-                    {
-                        try
-                        {
-                            if (client.Connected && client.GetStream().CanWrite)
-                            {
-                                SendBrand(client, brand);
-                            }
-                            else
-                            {
-                                disconnectedClients.Add(client);
-                            }
-                        }
-                        catch
-                        {
-                            disconnectedClients.Add(client);
-                        }
-                    }
-
-                    foreach (var client in disconnectedClients)
-                    {
-                        _clients.Remove(client);
-                        try
-                        {
-                            client.Close();
-                        }
-                        catch { }
-                    }
-                }
             }
         }
 
@@ -218,4 +169,3 @@ namespace Laba3
         }
     }
 }
-
