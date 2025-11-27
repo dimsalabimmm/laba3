@@ -30,6 +30,7 @@ namespace Laba3
         // Loader management
         private readonly Dictionary<string, LoaderClient> _loaders = new Dictionary<string, LoaderClient>();
         private readonly Dictionary<string, Panel> _loaderStatusPanels = new Dictionary<string, Panel>();
+        private readonly Dictionary<int, LoaderServer> _localServers = new Dictionary<int, LoaderServer>();
         private Panel _loadersPanel;
         private Button _addLoaderButton;
         private TextBox _loaderIpTextBox;
@@ -44,6 +45,59 @@ namespace Laba3
             InitializeComponent();
             InitializeDataBinding();
             SeedInitialBrands();
+            StartLocalServer();
+        }
+
+        private void StartLocalServer()
+        {
+            try
+            {
+                // Start multiple servers on different ports (8080-8084)
+                for (int port = 8080; port <= 8084; port++)
+                {
+                    try
+                    {
+                        var server = new LoaderServer("0.0.0.0", port);
+                        server.Start();
+                        _localServers[port] = server;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Port might be in use, skip it
+                        System.Diagnostics.Debug.WriteLine($"Failed to start server on port {port}: {ex.Message}");
+                    }
+                }
+                
+                // Get all available IP addresses on this machine
+                var availableIPs = new System.Text.StringBuilder();
+                availableIPs.AppendLine($"Локальные серверы запущены на портах: {string.Join(", ", _localServers.Keys)}");
+                availableIPs.AppendLine("\nВы можете подключиться используя любой из этих адресов:");
+                
+                foreach (var port in _localServers.Keys)
+                {
+                    availableIPs.AppendLine($"• 127.0.0.1:{port} (localhost)");
+                }
+                
+                // Get network IPs
+                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        foreach (var port in _localServers.Keys)
+                        {
+                            availableIPs.AppendLine($"• {ip}:{port} (сетевой адрес)");
+                        }
+                        break; // Only show first network IP to avoid cluttering
+                    }
+                }
+                
+                MessageBox.Show(this, availableIPs.ToString(), "Серверы запущены", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Не удалось запустить локальные серверы: {ex.Message}", "Предупреждение", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void InitializeComponent()
@@ -81,7 +135,7 @@ namespace Laba3
             var loadersPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 60,
+                Height = 200,
                 BackColor = Color.FromArgb(240, 242, 247),
                 Padding = new Padding(10)
             };
@@ -129,12 +183,17 @@ namespace Laba3
 
             _loadersPanel = new Panel
             {
-                Dock = DockStyle.Fill,
+                Location = new Point(10, 50),
                 AutoScroll = true,
-                BackColor = Color.Transparent
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
             };
 
             loadersPanel.Controls.AddRange(new Control[] { ipLabel, _loaderIpTextBox, portLabel, _loaderPortTextBox, _addLoaderButton, _loadersPanel });
+            
+            // Set size after adding to parent so ClientSize is correct
+            _loadersPanel.Size = new Size(loadersPanel.ClientSize.Width - 20, loadersPanel.ClientSize.Height - 60);
 
             Controls.Add(loadersPanel);
 
@@ -761,7 +820,43 @@ namespace Laba3
 
             _loaders[key] = client;
             CreateLoaderStatusPanel(key, _loaderIpTextBox.Text, port);
-            await client.ConnectAsync();
+            
+            // Disable the add button and show connecting status
+            _addLoaderButton.Enabled = false;
+            _addLoaderButton.Text = "Подключение...";
+            
+            try
+            {
+                // Try to connect with timeout and error handling
+                var errorMessage = await client.ConnectAsync();
+                
+                if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    // Connection failed - show error and remove the loader
+                    MessageBox.Show(this, errorMessage, "Ошибка подключения", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    
+                    // Clean up failed loader
+                    _loaders.Remove(key);
+                    if (_loaderStatusPanels.ContainsKey(key))
+                    {
+                        var panel = _loaderStatusPanels[key];
+                        _loaderStatusPanels.Remove(key);
+                        _loadersPanel.Controls.Remove(panel);
+                        panel?.Dispose();
+                    }
+                }
+                else
+                {
+                    // Connection successful
+                    MessageBox.Show(this, $"Успешно подключено к {_loaderIpTextBox.Text}:{port}", "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            finally
+            {
+                // Re-enable the add button
+                _addLoaderButton.Enabled = true;
+                _addLoaderButton.Text = "Добавить лоадер";
+            }
         }
 
         private void AddBrandFromLoader(CarBrand brand)
@@ -818,11 +913,20 @@ namespace Laba3
             requestButton.FlatAppearance.BorderSize = 0;
             requestButton.Click += (s, e) =>
             {
-                if (_loaders.ContainsKey(key) && _loaders[key].IsConnected)
+                if (!_loaders.ContainsKey(key))
                 {
-                    // Отправляем бинарный запрос (просто байт 1 для запроса данных)
+                    return;
+                }
+
+                if (_loaders[key].IsConnected)
+                {
+                    // Send a single request
                     byte[] request = new byte[] { 1 };
                     _loaders[key].SendRequest(request);
+                }
+                else
+                {
+                    MessageBox.Show(this, "Лоадер не подключен!", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             };
 
@@ -838,13 +942,31 @@ namespace Laba3
             removeButton.FlatAppearance.BorderSize = 0;
             removeButton.Click += (s, e) =>
             {
-                if (_loaders.ContainsKey(key))
+                try
                 {
-                    _loaders[key].Disconnect();
-                    _loaders.Remove(key);
+                    // Disconnect and remove the loader
+                    if (_loaders.ContainsKey(key))
+                    {
+                        _loaders[key]?.Disconnect();
+                        _loaders.Remove(key);
+                    }
+                    
+                    // Remove from status panels dictionary
+                    _loaderStatusPanels.Remove(key);
+                    
+                    // Remove the panel from the UI
+                    if (_loadersPanel != null && panel != null && _loadersPanel.Controls.Contains(panel))
+                    {
+                        _loadersPanel.Controls.Remove(panel);
+                    }
+                    
+                    // Dispose the panel to free resources
+                    panel?.Dispose();
                 }
-                _loaderStatusPanels.Remove(key);
-                _loadersPanel.Controls.Remove(panel);
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, $"Ошибка при удалении лоадера: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             };
 
             panel.Controls.AddRange(new Control[] { statusCircle, label, removeButton, requestButton });
@@ -871,11 +993,19 @@ namespace Laba3
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // Disconnect all loaders
             foreach (var loader in _loaders.Values)
             {
                 loader.Disconnect();
             }
             _loaders.Clear();
+
+            // Stop all local servers
+            foreach (var server in _localServers.Values)
+            {
+                server?.Stop();
+            }
+            _localServers.Clear();
 
             if (_loadCts != null)
             {

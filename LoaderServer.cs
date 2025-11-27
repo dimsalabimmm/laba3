@@ -79,11 +79,70 @@ namespace Laba3
                     {
                         _clients.Add(client);
                     }
+                    // Start listening for requests from this client
+                    _ = Task.Run(() => HandleClientRequests(client));
                 }
                 catch
                 {
                     break;
                 }
+            }
+        }
+
+        private async Task HandleClientRequests(TcpClient client)
+        {
+            try
+            {
+                var stream = client.GetStream();
+                var buffer = new byte[1024];
+
+                while (_isRunning && client.Connected)
+                {
+                    if (stream.DataAvailable)
+                    {
+                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                        if (bytesRead > 0)
+                        {
+                            // Client sent a request, send a brand immediately
+                            var brand = GenerateRandomBrand();
+                            SendBrand(client, brand);
+                        }
+                    }
+                    await Task.Delay(100); // Small delay to prevent busy waiting
+                }
+                
+                // Normal exit: cleanup resources
+                lock (_clientsLock)
+                {
+                    if (_clients.Contains(client))
+                    {
+                        _clients.Remove(client);
+                    }
+                }
+                
+                try
+                {
+                    stream?.Close();
+                    client?.Close();
+                }
+                catch { }
+            }
+            catch
+            {
+                // Exception exit: cleanup resources
+                lock (_clientsLock)
+                {
+                    if (_clients.Contains(client))
+                    {
+                        _clients.Remove(client);
+                    }
+                }
+                
+                try
+                {
+                    client.Close();
+                }
+                catch { }
             }
         }
 
